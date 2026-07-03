@@ -2,52 +2,123 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>Browser inference demo</title>
-
+    <title>VoxNav Voice Control</title>
     <style>
-        #features {
-            width: 50%;
-            font-size: 18px;
-        }
-
-        #results {
-            font-family: monospace;
-            white-space: pre;
-        }
+        body { font-family: Arial; text-align: center; background:#111; color:white; padding:20px; }
+        h2 { color: cyan; }
+        button { padding: 12px 24px; font-size: 16px; margin: 8px; border-radius: 8px; border:none; }
+        #startBtn { background: #28a745; color:white; }
+        #stopBtn  { background: #dc3545; color:white; }
+        input { padding:8px; font-size:14px; border-radius:6px; border:1px solid #555; width:180px; }
+        #results { font-family: monospace; white-space: pre; text-align:left; background:#222; padding:10px; border-radius:8px; margin-top:15px; }
+        #status { font-size:18px; margin:10px; color:yellow; }
     </style>
 </head>
 <body>
-    <h1></h1>
+    <h2 id="projectName">VoxNav Voice Control</h2>
 
-    <p>
-        <input type="text" id="features" placeholder="Paste your features here">
-    </p>
-    <p>
-        <button id="run-inference">Run inference</button>
-    </p>
+    <p>ESP32 IP: <input type="text" id="espIp" value="192.168.4.1"></p>
+
+    <button id="startBtn">Start Listening</button>
+    <button id="stopBtn">Stop</button>
+
+    <p id="status">Idle</p>
     <p id="results"></p>
 
     <script src="edge-impulse-standalone.js"></script>
-    <script src="run-impulse.js"></script>
     <script>
+        let classifier, audioCtx, mediaStream, processor, source;
+        let sampleWindow = [];
+        let windowSize = 0;
+        let targetFreq = 0;
+        let listening = false;
+        let lastSentTime = 0;
+        const COOLDOWN_MS = 1500;
+
         (async () => {
-            var classifier = new EdgeImpulseClassifier();
+            classifier = new EdgeImpulseClassifier();
             await classifier.init();
 
             let project = classifier.getProjectInfo();
-            document.querySelector('h1').textContent = project.owner + ' / ' + project.name + ' (version ' + project.deploy_version + ')';
+            document.querySelector('#projectName').textContent =
+                project.owner + ' / ' + project.name;
 
-            document.querySelector('#run-inference').onclick = () => {
-                try {
-                    let features = document.querySelector('#features').value.split(',').map(x => Number(x.trim()));
-                    let res = classifier.classify(features);
-                    document.querySelector('#results').textContent = JSON.stringify(res, null, 4);
-                }
-                catch (ex) {
-                    alert('Failed to classify: ' + (ex.message || ex.toString()));
+            let props = classifier.getProperties();
+            targetFreq = props.frequency;
+            windowSize = props.input_features_count;
+
+            document.querySelector('#status').textContent =
+                'Model loaded. Sample rate: ' + targetFreq + 'Hz, Window: ' + windowSize;
+        })();
+
+        document.querySelector('#startBtn').onclick = async () => {
+            if (listening) return;
+            listening = true;
+            document.querySelector('#status').textContent = 'Listening...';
+
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            source = audioCtx.createMediaStreamSource(mediaStream);
+
+            processor = audioCtx.createScriptProcessor(4096, 1, 1);
+            source.connect(processor);
+            processor.connect(audioCtx.destination);
+
+            const browserRate = audioCtx.sampleRate;
+            const ratio = browserRate / targetFreq;
+
+            processor.onaudioprocess = (e) => {
+                if (!listening) return;
+                let input = e.inputBuffer.getChannelData(0);
+
+                for (let i = 0; i < input.length; i += ratio) {
+                    let sample = input[Math.floor(i)];
+                    sampleWindow.push(Math.max(-32768, Math.min(32767, sample * 32768)));
+
+                    if (sampleWindow.length >= windowSize) {
+                        runClassification(sampleWindow.slice(0, windowSize));
+                        sampleWindow = sampleWindow.slice(windowSize / 2);
+                    }
                 }
             };
-        })();
+        };
+
+        document.querySelector('#stopBtn').onclick = () => {
+            listening = false;
+            if (processor) processor.disconnect();
+            if (source) source.disconnect();
+            if (mediaStream) mediaStream.getTracks().forEach(t => t.stop());
+            document.querySelector('#status').textContent = 'Stopped';
+        };
+
+        function runClassification(windowData) {
+            try {
+                let res = classifier.classify(windowData);
+                document.querySelector('#results').textContent = JSON.stringify(res.results, null, 2);
+
+                res.results.forEach(r => {
+                    if (r.value > 0.70) {
+                        handleDetection(r.label);
+                    }
+                });
+            } catch (ex) {
+                console.error('Classify failed:', ex);
+            }
+        }
+
+        function handleDetection(label) {
+            const now = Date.now();
+            if (now - lastSentTime < COOLDOWN_MS) return;
+            lastSentTime = now;
+
+            document.querySelector('#status').textContent = 'Detected: ' + label;
+
+            const ip = document.querySelector('#espIp').value.trim();
+            fetch(`http://${ip}/cmd?label=${label}`)
+                .then(r => r.text())
+                .then(txt => console.log('ESP32 response:', txt))
+                .catch(err => console.error('Failed to reach ESP32:', err));
+        }
     </script>
 </body>
 </html>
