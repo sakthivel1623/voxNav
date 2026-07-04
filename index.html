@@ -26,7 +26,7 @@
     <p id="results"></p>
 
     <script src="edge-impulse-standalone.js"></script>
-    <script src="run-impluse.js"></script>
+
     <script>
         let classifier, audioCtx, mediaStream, processor, source;
         let sampleWindow = [];
@@ -36,8 +36,26 @@
         let lastSentTime = 0;
         const COOLDOWN_MS = 1500;
 
+        function waitForClassifier() {
+            return new Promise((resolve) => {
+                if (typeof EdgeImpulseClassifier !== 'undefined') {
+                    resolve();
+                } else {
+                    const check = setInterval(() => {
+                        if (typeof EdgeImpulseClassifier !== 'undefined') {
+                            clearInterval(check);
+                            resolve();
+                        }
+                    }, 100);
+                }
+            });
+        }
+
         (async () => {
-            classifier = new EdgeImpulseClassifier(); 
+            document.querySelector('#status').textContent = 'Loading AI model...';
+            await waitForClassifier();
+
+            classifier = new EdgeImpulseClassifier();
             await classifier.init();
 
             let project = classifier.getProjectInfo();
@@ -104,9 +122,9 @@
                 });
             } catch (ex) {
                 console.error('Classify failed:', ex);
-            } 
+            }
         }
- 
+
         function handleDetection(label) {
             const now = Date.now();
             if (now - lastSentTime < COOLDOWN_MS) return;
