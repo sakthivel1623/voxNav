@@ -25,8 +25,8 @@
     <p id="status">Idle</p>
     <p id="results"></p>
 
-    <script src="edge-impulse-standalone.js"></script> 
-    <script src="run-impulse.js"></script> 
+    <script src="edge-impulse-standalone.js"></script>
+    <script src="run-impulse.js"></script>
 
     <script>
         let classifier, audioCtx, mediaStream, processor, source;
@@ -59,9 +59,7 @@
             classifier = new EdgeImpulseClassifier();
             await classifier.init();
 
-            let project = classifier.getProjectInfo();
-            document.querySelector('#projectName').textContent =
-                project.owner + ' / ' + project.name;
+            document.querySelector('#projectName').textContent = 'VoxNav Voice Control';
 
             let props = classifier.getProperties();
             targetFreq = props.frequency;
