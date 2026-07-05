@@ -115,7 +115,7 @@
                 document.querySelector('#results').textContent = JSON.stringify(res.results, null, 2);
 
                 res.results.forEach(r => {
-                    if (r.value > 0.70) {
+                    if (r.value > 0.90) {
                         handleDetection(r.label);
                     }
                 });
